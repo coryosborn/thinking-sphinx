@@ -38,10 +38,10 @@ class ThinkingSphinx::Configuration < Riddle::Configuration
   end
 
   def engine_index_paths
-    return [] unless defined?(Rails)
+    return [] unless defined?(Rails) && !Rails.env.test?
 
     Rails::Engine::Railties.engines.map{ |e|
-      e.paths['app/indices'].existent
+      p = e.paths['app/indices'].existent
     }.flatten
   end
 
