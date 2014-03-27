@@ -4,6 +4,7 @@ end
 
 require 'thinking_sphinx/middlewares/middleware'
 require 'thinking_sphinx/middlewares/geographer'
+require 'thinking_sphinx/float_formatter'
 
 describe ThinkingSphinx::Middlewares::Geographer do
   let(:app)        { double('app', :call => true) }
@@ -25,7 +26,7 @@ describe ThinkingSphinx::Middlewares::Geographer do
       end
 
       it "doesn't add anything if :geo is nil" do
-        sphinx_sql.should_not_receive(:values)
+        sphinx_sql.should_not_receive(:prepend_values)
 
         middleware.call [context]
       end
@@ -37,7 +38,7 @@ describe ThinkingSphinx::Middlewares::Geographer do
       end
 
       it "adds the geodist function when given a :geo option" do
-        sphinx_sql.should_receive(:values).
+        sphinx_sql.should_receive(:prepend_values).
           with('GEODIST(0.1, 0.2, lat, lng) AS geodist').
           and_return(sphinx_sql)
 
@@ -45,7 +46,7 @@ describe ThinkingSphinx::Middlewares::Geographer do
       end
 
       it "adds the distance pane" do
-        sphinx_sql.stub :values => sphinx_sql
+        sphinx_sql.stub :prepend_values => sphinx_sql
 
         middleware.call [context]
 
@@ -56,7 +57,7 @@ describe ThinkingSphinx::Middlewares::Geographer do
         search.options[:latitude_attr]  = 'side_to_side'
         search.options[:longitude_attr] = 'up_or_down'
 
-        sphinx_sql.should_receive(:values).
+        sphinx_sql.should_receive(:prepend_values).
           with('GEODIST(0.1, 0.2, side_to_side, up_or_down) AS geodist').
           and_return(sphinx_sql)
 
@@ -67,7 +68,7 @@ describe ThinkingSphinx::Middlewares::Geographer do
         context[:indices] << double('index',
           :unique_attribute_names => ['latitude'], :name => 'an_index')
 
-        sphinx_sql.should_receive(:values).
+        sphinx_sql.should_receive(:prepend_values).
           with('GEODIST(0.1, 0.2, latitude, lng) AS geodist').
           and_return(sphinx_sql)
 
@@ -78,8 +79,18 @@ describe ThinkingSphinx::Middlewares::Geographer do
         context[:indices] << double('index',
           :unique_attribute_names => ['longitude'], :name => 'an_index')
 
-        sphinx_sql.should_receive(:values).
+        sphinx_sql.should_receive(:prepend_values).
           with('GEODIST(0.1, 0.2, lat, longitude) AS geodist').
+          and_return(sphinx_sql)
+
+        middleware.call [context]
+      end
+
+      it "handles very small values" do
+        search.options[:geo] = [0.0000001, 0.00000000002]
+
+        sphinx_sql.should_receive(:prepend_values).
+          with('GEODIST(0.0000001, 0.00000000002, lat, lng) AS geodist').
           and_return(sphinx_sql)
 
         middleware.call [context]

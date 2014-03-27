@@ -18,9 +18,13 @@ class ThinkingSphinx::Panes::ExcerptsPane
   end
 
   def excerpt_words
-    @excerpt_words ||= @context[:meta].keys.select { |key|
-      key[/^keyword\[/]
-    }.sort.collect { |key| @context[:meta][key] }.join(' ')
+    @excerpt_words ||= begin
+      conditions = @context.search.options[:conditions] || {}
+      ThinkingSphinx::Search::Query.new(
+        ([@context.search.query] + conditions.values).compact.join(' '),
+        {}, @context.search.options[:star]
+      ).to_s
+    end
   end
 
   class Excerpts

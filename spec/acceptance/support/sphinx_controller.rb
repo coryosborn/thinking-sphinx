@@ -5,6 +5,7 @@ class SphinxController
 
   def setup
     FileUtils.mkdir_p config.indices_location
+    config.controller.bin_path = ENV['SPHINX_BIN'] || ''
     config.render_to_file && index
 
     ThinkingSphinx::Configuration.reset
@@ -14,6 +15,10 @@ class SphinxController
     end
 
     ActiveSupport::Dependencies.clear
+
+    if ENV['SPHINX_VERSION'].try :[], /2.0.\d/
+      ThinkingSphinx::Configuration.instance.settings['utf8'] = false
+    end
 
     config.searchd.mysql41 = 9307
     config.settings['quiet_deltas']      = true

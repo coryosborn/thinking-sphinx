@@ -5,6 +5,10 @@ class ThinkingSphinx::ActiveRecord::DatabaseAdapters::MySQLAdapter <
     value ? 1 : 0
   end
 
+  def cast_to_string(clause)
+    "CAST(#{clause} AS char)"
+  end
+
   def cast_to_timestamp(clause)
     "UNIX_TIMESTAMP(#{clause})"
   end
@@ -17,7 +21,19 @@ class ThinkingSphinx::ActiveRecord::DatabaseAdapters::MySQLAdapter <
     "IFNULL(#{clause}, #{default})"
   end
 
+  def convert_blank(clause, default = '')
+    "COALESCE(NULLIF(#{clause}, ''), #{default})"
+  end
+
   def group_concatenate(clause, separator = ' ')
-    "GROUP_CONCAT(#{clause} SEPARATOR '#{separator}')"
+    "GROUP_CONCAT(DISTINCT #{clause} SEPARATOR '#{separator}')"
+  end
+
+  def time_zone_query_pre
+    ["SET TIME_ZONE = '+0:00'"]
+  end
+
+  def utf8_query_pre
+    ['SET NAMES utf8']
   end
 end

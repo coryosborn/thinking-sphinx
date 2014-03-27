@@ -10,16 +10,25 @@ class ThinkingSphinx::Excerpter
   def initialize(index, words, options = {})
     @index, @words = index, words
     @options = DefaultOptions.merge(options)
+    @words = @options.delete(:words) if @options[:words]
   end
 
   def excerpt!(text)
-    connection.query(Riddle::Query.snippets(text, index, words, options)).
-      first['snippet']
+    result = ThinkingSphinx::Connection.take do |connection|
+      connection.execute(statement_for(text)).first['snippet']
+    end
+
+    encoded? ? result : ThinkingSphinx::UTF8.encode(result)
   end
 
   private
 
-  def connection
-    @connection ||= ThinkingSphinx::Connection.new
+  def statement_for(text)
+    Riddle::Query.snippets(text, index, words, options)
+  end
+
+  def encoded?
+    ThinkingSphinx::Configuration.instance.settings['utf8'].nil? ||
+    ThinkingSphinx::Configuration.instance.settings['utf8']
   end
 end

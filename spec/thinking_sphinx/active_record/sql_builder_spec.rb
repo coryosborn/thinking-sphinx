@@ -4,25 +4,27 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
   let(:source)       { double('source', :model => model, :offset => 3,
     :fields => [], :attributes => [], :disable_range? => false,
     :delta_processor => nil, :conditions => [], :groupings => [],
-    :adapter => adapter, :associations => [], :primary_key => :id) }
+    :adapter => adapter, :associations => [], :primary_key => :id,
+    :options => {}) }
   let(:model)        { double('model', :connection => connection,
     :descends_from_active_record? => true, :column_names => [],
     :inheritance_column => 'type', :unscoped => relation,
     :quoted_table_name => '`users`', :name => 'User') }
   let(:connection)   { double('connection') }
   let(:relation)     { double('relation') }
-  let(:config)       { double('config', :indices => indices) }
+  let(:config)       { double('config', :indices => indices, :settings => {}) }
   let(:indices)      { double('indices', :count => 5) }
   let(:presenter)    { double('presenter', :to_select => '`name` AS `name`',
     :to_group => '`name`') }
-  let(:adapter)      { double('adapter') }
+  let(:adapter)      { double('adapter',
+    :time_zone_query_pre => ['SET TIME ZONE']) }
   let(:associations) { double('associations', :join_values => []) }
   let(:builder)      { ThinkingSphinx::ActiveRecord::SQLBuilder.new source }
 
   before :each do
     ThinkingSphinx::Configuration.stub! :instance => config
     ThinkingSphinx::ActiveRecord::PropertySQLPresenter.stub! :new => presenter
-    ThinkingSphinx::ActiveRecord::Associations.stub! :new => associations
+    Joiner::Joins.stub! :new => associations
     relation.stub! :select => relation, :where => relation, :group => relation,
       :order => relation, :joins => relation, :to_sql => ''
     connection.stub!(:quote_column_name) { |column| "`#{column}`"}
@@ -105,8 +107,7 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
 
       it "limits results to a set range" do
         relation.should_receive(:where) do |string|
-          string.should match(/`users`.`id` >= \$start/)
-          string.should match(/`users`.`id` <= \$end/)
+          string.should match(/`users`.`id` BETWEEN \$start AND \$end/)
           relation
         end
 
@@ -117,8 +118,7 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
         source.stub! :disable_range? => true
 
         relation.should_receive(:where) do |string|
-          string.should_not match(/`users`.`id` >= \$start/)
-          string.should_not match(/`users`.`id` <= \$end/)
+          string.should_not match(/`users`.`id` BETWEEN \$start AND \$end/)
           relation
         end
 
@@ -318,8 +318,7 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
 
       it "limits results to a set range" do
         relation.should_receive(:where) do |string|
-          string.should match(/"users"."id" >= \$start/)
-          string.should match(/"users"."id" <= \$end/)
+          string.should match(/"users"."id" BETWEEN \$start AND \$end/)
           relation
         end
 
@@ -330,8 +329,7 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
         source.stub! :disable_range? => true
 
         relation.should_receive(:where) do |string|
-          string.should_not match(/"users"."id" >= \$start/)
-          string.should_not match(/"users"."id" <= \$end/)
+          string.should_not match(/"users"."id" BETWEEN \$start AND \$end/)
           relation
         end
 
@@ -396,6 +394,55 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
         relation.should_not_receive(:order)
 
         builder.sql_query
+      end
+
+      context 'group by shortcut' do
+        before :each do
+          source.options[:minimal_group_by?] = true
+        end
+
+        it "groups by the primary key" do
+          relation.should_receive(:group) do |string|
+            string.should match(/"users"."id"/)
+            relation
+          end
+
+          builder.sql_query
+        end
+
+        it "does not group by fields" do
+          source.fields << double('field')
+
+          relation.should_receive(:group) do |string|
+            string.should_not match(/"name"/)
+            relation
+          end
+
+          builder.sql_query
+        end
+
+        it "does not group by attributes" do
+          source.attributes << double('attribute')
+          presenter.stub!(:to_group => '"created_at"')
+
+          relation.should_receive(:group) do |string|
+            string.should_not match(/"created_at"/)
+            relation
+          end
+
+          builder.sql_query
+        end
+
+        it "groups by source groupings" do
+          source.groupings << '"latitude"'
+
+          relation.should_receive(:group) do |string|
+            string.should match(/"latitude"/)
+            relation
+          end
+
+          builder.sql_query
+        end
       end
 
       context 'STI model' do
@@ -498,18 +545,28 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
     end
   end
 
+  describe 'sql_query_post_index' do
+    let(:processor) { double('processor', :reset_query => 'RESET DELTAS') }
+
+    it "adds a reset delta query if there is a delta processor and this is the core source" do
+      source.stub :delta_processor => processor, :delta? => false
+
+      builder.sql_query_post_index.should include('RESET DELTAS')
+    end
+
+    it "adds no reset delta query if there is a delta processor and this is the delta source" do
+      source.stub :delta_processor => processor, :delta? => true
+
+      builder.sql_query_post_index.should_not include('RESET DELTAS')
+    end
+  end
+
   describe 'sql_query_pre' do
     let(:processor) { double('processor', :reset_query => 'RESET DELTAS') }
 
     before :each do
       source.stub :options => {}, :delta_processor => nil, :delta? => false
-      adapter.stub :utf8_query_pre => 'SET UTF8'
-    end
-
-    it "adds a reset delta query if there is a delta processor and this is the core source" do
-      source.stub :delta_processor => processor
-
-      builder.sql_query_pre.should include('RESET DELTAS')
+      adapter.stub :utf8_query_pre => ['SET UTF8']
     end
 
     it "does not add a reset query if there is no delta processor" do
@@ -548,6 +605,16 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
       source.options[:utf8?] = false
 
       builder.sql_query_pre.should_not include('SET UTF8')
+    end
+
+    it "adds a time-zone query by default" do
+      expect(builder.sql_query_pre).to include('SET TIME ZONE')
+    end
+
+    it "does not add a time-zone query if requested" do
+      config.settings['skip_time_zone'] = true
+
+      expect(builder.sql_query_pre).to_not include('SET TIME ZONE')
     end
   end
 
@@ -590,8 +657,7 @@ describe ThinkingSphinx::ActiveRecord::SQLBuilder do
 
     it "shouldn't limit results to a range" do
       relation.should_receive(:where) do |string|
-        string.should_not match(/`users`.`id` >= \$start/)
-        string.should_not match(/`users`.`id` <= \$end/)
+        string.should_not match(/`users`.`id` BETWEEN \$start AND \$end/)
         relation
       end
 

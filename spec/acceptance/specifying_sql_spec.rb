@@ -128,7 +128,7 @@ describe 'specifying SQL for index definitions' do
     query.should match(/articles\..title., books\..title./)
   end
 
-  it "concatenates references where that have column" do
+  it "concatenates references that have column" do
     index = ThinkingSphinx::ActiveRecord::Index.new(:event)
     index.definition_block = Proc.new {
       indexes eventable.title, :as => :title
@@ -138,8 +138,8 @@ describe 'specifying SQL for index definitions' do
 
     query = index.sources.first.sql_query
     query.should match(/LEFT OUTER JOIN .articles. ON .articles.\..id. = .events.\..eventable_id. AND .events.\..eventable_type. = 'Article'/)
-    query.should match(/LEFT OUTER JOIN .users. ON .users.\..id. = .events.\..eventable_id. AND .events.\..eventable_type. = 'User'/)
     query.should_not match(/articles\..title., users\..title./)
+    query.should match(/articles\..title./)
   end
 
   it "respects deeper associations through polymorphic joins" do
@@ -264,7 +264,7 @@ describe 'separate queries for MVAs' do
     declaration, query, range = attribute.split(/;\s+/)
 
     declaration.should == 'uint tag_ids from ranged-query'
-    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .taggings.\..tag_id. AS .tag_ids. FROM .taggings. \s?WHERE \(.taggings.\..article_id. >= \$start\) AND \(.taggings.\..article_id. <= \$end\)$/)
+    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .taggings.\..tag_id. AS .tag_ids. FROM .taggings. \s?WHERE \(.taggings.\..article_id. BETWEEN \$start AND \$end\)$/)
     range.should match(/^SELECT MIN\(.taggings.\..article_id.\), MAX\(.taggings.\..article_id.\) FROM .taggings.\s?$/)
   end
 
@@ -281,7 +281,7 @@ describe 'separate queries for MVAs' do
     declaration, query, range = attribute.split(/;\s+/)
 
     declaration.should == 'uint tag_ids from ranged-query'
-    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..id. AS .tag_ids. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. \s?WHERE \(.taggings.\..article_id. >= \$start\) AND \(.taggings.\..article_id. <= \$end\)$/)
+    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..id. AS .tag_ids. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. \s?WHERE \(.taggings.\..article_id. BETWEEN \$start AND \$end\)$/)
     range.should match(/^SELECT MIN\(.taggings.\..article_id.\), MAX\(.taggings.\..article_id.\) FROM .taggings.\s?$/)
   end
 
@@ -355,7 +355,7 @@ describe 'separate queries for field' do
     declaration, query = field.split(/;\s+/)
 
     declaration.should == 'tags from query'
-    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. ORDER BY .taggings.\..article_id. ASC\s?$/)
+    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id.\s? ORDER BY .taggings.\..article_id. ASC\s?$/)
   end
 
   it "respects has_many :through joins for MVF queries" do
@@ -368,7 +368,7 @@ describe 'separate queries for field' do
     declaration, query = field.split(/;\s+/)
 
     declaration.should == 'tags from query'
-    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. ORDER BY .taggings.\..article_id. ASC\s?$/)
+    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id.\s? ORDER BY .taggings.\..article_id. ASC\s?$/)
   end
 
   it "can handle multiple joins for MVF queries" do
@@ -383,7 +383,7 @@ describe 'separate queries for field' do
     declaration, query = field.split(/;\s+/)
 
     declaration.should == 'tags from query'
-    query.should match(/^SELECT .articles.\..user_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .articles. INNER JOIN .taggings. ON .taggings.\..article_id. = .articles.\..id. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. ORDER BY .articles.\..user_id. ASC\s?$/)
+    query.should match(/^SELECT .articles.\..user_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .articles. INNER JOIN .taggings. ON .taggings.\..article_id. = .articles.\..id. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id.\s? ORDER BY .articles.\..user_id. ASC\s?$/)
   end
 
   it "generates a SQL query with joins when appropriate for MVFs" do
@@ -396,7 +396,7 @@ describe 'separate queries for field' do
     declaration, query, range = field.split(/;\s+/)
 
     declaration.should == 'tags from ranged-query'
-    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. \s?WHERE \(.taggings.\..article_id. >= \$start\) AND \(.taggings.\..article_id. <= \$end\) ORDER BY .taggings.\..article_id. ASC$/)
+    query.should match(/^SELECT .taggings.\..article_id. \* #{count} \+ #{source.offset} AS .id., .tags.\..name. AS .tags. FROM .taggings. INNER JOIN .tags. ON .tags.\..id. = .taggings.\..tag_id. \s?WHERE \(.taggings.\..article_id. BETWEEN \$start AND \$end\)\s? ORDER BY .taggings.\..article_id. ASC$/)
     range.should match(/^SELECT MIN\(.taggings.\..article_id.\), MAX\(.taggings.\..article_id.\) FROM .taggings.\s?$/)
   end
 

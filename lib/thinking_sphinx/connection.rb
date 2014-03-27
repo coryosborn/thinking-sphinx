@@ -7,15 +7,15 @@ module ThinkingSphinx::Connection
     address = '127.0.0.1' if address == 'localhost'
 
     options = {
-      :host  => address,
-      :port  => configuration.searchd.mysql41
+      :host      => address,
+      :port      => configuration.searchd.mysql41,
+      :reconnect => true
     }.merge(configuration.settings['connection_options'] || {})
 
     connection_class.new address, options[:port], options
   end
 
   def self.connection_class
-    raise "Sphinx's MySQL protocol does not work with JDBC." if RUBY_PLATFORM == 'java'
     return ThinkingSphinx::Connection::JRuby if RUBY_PLATFORM == 'java'
 
     ThinkingSphinx::Connection::MRI
@@ -35,7 +35,7 @@ module ThinkingSphinx::Connection
       pool.take do |connection|
         begin
           yield connection
-        rescue Mysql2::Error => error
+        rescue ThinkingSphinx::QueryExecutionError, connection.base_error => error
           original = ThinkingSphinx::SphinxError.new_from_mysql error
           raise original if original.is_a?(ThinkingSphinx::QueryError)
           raise Innertube::Pool::BadResource
@@ -43,63 +43,131 @@ module ThinkingSphinx::Connection
       end
     rescue Innertube::Pool::BadResource
       retries += 1
-      retry if retries < 3
-      raise original
+      raise original unless retries < 3
+
+      ActiveSupport::Notifications.instrument(
+        "message.thinking_sphinx", :message => "Retrying query \"#{original.statement}\" after error: #{original.message}"
+      )
+      retry
     end
   end
 
-  class MRI
-    attr_reader :client
+  def self.persistent?
+    @persistent
+  end
 
+  def self.persistent=(persist)
+    @persistent = persist
+  end
+
+  @persistent = true
+
+  class Client
+    def close
+      client.close unless ThinkingSphinx::Connection.persistent?
+    end
+
+    def execute(statement)
+      query(statement).first
+    end
+
+    def query_all(*statements)
+      query *statements
+    end
+
+    private
+
+    def close_and_clear
+      client.close
+      @client = nil
+    end
+
+    def query(*statements)
+      results_for *statements
+    rescue => error
+      wrapper           = ThinkingSphinx::QueryExecutionError.new error.message
+      wrapper.statement = statements.join('; ')
+      raise wrapper
+    ensure
+      close_and_clear unless ThinkingSphinx::Connection.persistent?
+    end
+  end
+
+  class MRI < Client
     def initialize(address, port, options)
-      @client = Mysql2::Client.new({
+      @address, @port, @options = address, port, options
+    end
+
+    def base_error
+      Mysql2::Error
+    end
+
+    private
+
+    attr_reader :address, :port, :options
+
+    def client
+      @client ||= Mysql2::Client.new({
         :host  => address,
         :port  => port,
         :flags => Mysql2::Client::MULTI_STATEMENTS
       }.merge(options))
+    rescue base_error => error
+      raise ThinkingSphinx::SphinxError.new_from_mysql error
     end
 
-    def close
-      client.close
-    end
-
-    def execute(statement)
-      client.query statement
-    rescue
-      puts "Error with statement: #{statement}"
-      raise
-    end
-
-    def query(statement)
-      client.query statement
-    end
-
-    def query_all(*statements)
+    def results_for(*statements)
       results  = [client.query(statements.join('; '))]
       results << client.store_result while client.next_result
       results
     end
   end
 
-  class JRuby
-    attr_reader :client
+  class JRuby < Client
+    attr_reader :address, :options
 
     def initialize(address, port, options)
-      address = "jdbc:mysql://#{address}:#{searchd.mysql41}"
-      @client = java.sql.DriverManager.getConnection address,
+      @address = "jdbc:mysql://#{address}:#{port}?allowMultiQueries=true"
+      @options = options
+    end
+
+    def base_error
+      Java::JavaSql::SQLException
+    end
+
+    private
+
+    def client
+      @client ||= java.sql.DriverManager.getConnection address,
         options[:username], options[:password]
+    rescue base_error => error
+      raise ThinkingSphinx::SphinxError.new_from_mysql error
     end
 
-    def execute(statement)
-      client.createStatement.execute statement
+    def results_for(*statements)
+      statement = client.createStatement
+      statement.execute statements.join('; ')
+
+      results   = [set_to_array(statement.getResultSet)]
+      results  << set_to_array(statement.getResultSet) while statement.getMoreResults
+      results.compact
     end
 
-    def query(statement)
-      #
-    end
+    def set_to_array(set)
+      return nil if set.nil?
 
-    def query_all(*statements)
-      #
+      meta = set.meta_data
+      rows = []
+
+      while set.next
+        rows << (1..meta.column_count).inject({}) do |row, index|
+          name      = meta.column_name index
+          row[name] = set.get_object(index)
+          row
+        end
+      end
+
+      rows
     end
   end
 end

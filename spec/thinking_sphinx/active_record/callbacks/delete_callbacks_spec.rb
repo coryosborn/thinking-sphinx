@@ -31,51 +31,27 @@ describe ThinkingSphinx::ActiveRecord::Callbacks::DeleteCallbacks do
   end
 
   describe '#after_destroy' do
-    let(:config)     { double('config', :indices_for_references => [index],
-      :preload_indices => true) }
-    let(:connection) { double('connection', :execute => nil) }
-    let(:index)      {
-      double('index', :name => 'foo_core', :document_id_for_key => 14)
-    }
-    let(:instance)   { double('instance', :id => 7) }
+    let(:index_set)  { double 'index set', :to_a => [index] }
+    let(:index)      { double('index', :name => 'foo_core',
+      :document_id_for_key => 14, :type => 'plain', :distributed? => false) }
+    let(:instance)   { double('instance', :id => 7, :new_record? => false) }
 
     before :each do
-      ThinkingSphinx::Configuration.stub :instance => config
-      ThinkingSphinx::Connection.stub    :new => connection
-      Riddle::Query.stub :update => 'UPDATE STATEMENT'
+      ThinkingSphinx::IndexSet.stub :new => index_set
     end
 
-    it "updates the deleted flag to false" do
-      connection.should_receive(:execute).with('UPDATE STATEMENT')
+    it "performs the deletion for the index and instance" do
+      ThinkingSphinx::Deletion.should_receive(:perform).with(index, 7)
 
       callbacks.after_destroy
     end
 
-    it "builds the update query for the given index" do
-      Riddle::Query.should_receive(:update).
-        with('foo_core', anything, anything).and_return('')
+    it "doesn't do anything if the instance is a new record" do
+      instance.stub :new_record? => true
+
+      ThinkingSphinx::Deletion.should_not_receive(:perform)
 
       callbacks.after_destroy
-    end
-
-    it "builds the update query for the sphinx document id" do
-      Riddle::Query.should_receive(:update).
-        with(anything, 14, anything).and_return('')
-
-      callbacks.after_destroy
-    end
-
-    it "builds the update query for setting sphinx_deleted to true" do
-      Riddle::Query.should_receive(:update).
-        with(anything, anything, :sphinx_deleted => true).and_return('')
-
-      callbacks.after_destroy
-    end
-
-    it "doesn't care about Sphinx errors" do
-      connection.stub(:execute).and_raise(Mysql2::Error.new(''))
-
-      lambda { callbacks.after_destroy }.should_not raise_error
     end
   end
 end

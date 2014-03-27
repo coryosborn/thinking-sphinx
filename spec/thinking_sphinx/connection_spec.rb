@@ -2,15 +2,18 @@ require 'spec_helper'
 
 describe ThinkingSphinx::Connection do
   describe '.take' do
-    let(:pool)             { double }
-    let(:connection)       { double }
-    let(:error)            { Mysql2::Error.new '' }
+    let(:pool)             { double 'pool' }
+    let(:connection)       { double 'connection', :base_error => StandardError }
+    let(:error)            { ThinkingSphinx::QueryExecutionError.new 'failed' }
     let(:translated_error) { ThinkingSphinx::SphinxError.new }
 
     before :each do
       ThinkingSphinx::Connection.stub :pool => pool
       ThinkingSphinx::SphinxError.stub :new_from_mysql => translated_error
       pool.stub(:take).and_yield(connection)
+
+      error.statement            = 'SELECT * FROM article_core'
+      translated_error.statement = 'SELECT * FROM article_core'
     end
 
     it "yields a connection from the pool" do
@@ -49,7 +52,7 @@ describe ThinkingSphinx::Connection do
           tries += 1
           raise error if tries < 4
         end
-      }.should raise_error(translated_error)
+      }.should raise_error(ThinkingSphinx::SphinxError)
     end
 
     [ThinkingSphinx::SyntaxError, ThinkingSphinx::ParseError].each do |klass|
@@ -59,7 +62,7 @@ describe ThinkingSphinx::Connection do
         it "raises the error" do
           lambda {
             ThinkingSphinx::Connection.take { |c| raise error }
-          }.should raise_error(translated_error)
+          }.should raise_error(klass)
         end
 
         it "does not yield the connection more than once" do

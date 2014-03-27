@@ -23,10 +23,38 @@ describe ThinkingSphinx::Configuration do
     end
   end
 
+  describe '.reset' do
+    after :each do
+      config.framework = ThinkingSphinx::Frameworks.current
+    end
+
+    it 'does not cache settings after reset' do
+      File.stub :exists? => true
+      File.stub :read => {
+        'test'       => {'foo' => 'bugs'},
+        'production' => {'foo' => 'bar'}
+      }.to_yaml
+
+      ThinkingSphinx::Configuration.reset
+      # Grab a new copy of the instance.
+      config = ThinkingSphinx::Configuration.instance
+      config.settings['foo'].should == 'bugs'
+
+      config.framework = double :environment => 'production', :root => Pathname.new(__FILE__).join('..', '..', 'internal')
+      config.settings['foo'].should == 'bar'
+    end
+  end
+
   describe '#configuration_file' do
     it "uses the Rails environment in the configuration file name" do
       config.configuration_file.
         should == File.join(Rails.root, 'config', 'test.sphinx.conf')
+    end
+
+    it "respects provided settings" do
+      write_configuration 'configuration_file' => '/path/to/foo.conf'
+
+      config.configuration_file.should == '/path/to/foo.conf'
     end
   end
 
@@ -62,13 +90,12 @@ describe ThinkingSphinx::Configuration do
     end
 
     it "uses app/indices in the Rails engines" do
-      engine =
-        stub(:engine, { :paths => { 'app/indices' =>
-          stub(:path, { :existent => '/engine/app/indices' } )
-        } } )
+      engine = double :engine, { :paths => { 'app/indices' =>
+        double(:path, { :existent => '/engine/app/indices' } )
+      } }
+      engine_class = double :instance => engine
 
-      Rails::Engine::Railties.should_receive(:engines).
-        and_return([ engine ])
+      Rails::Engine.should_receive(:subclasses).and_return([ engine_class ])
 
       config.index_paths.should include('/engine/app/indices')
     end
@@ -76,6 +103,9 @@ describe ThinkingSphinx::Configuration do
 
   describe '#indices_for_references' do
     it "selects from the full index set those with matching references" do
+      config.preload_indices
+      config.indices.clear
+
       config.indices << double('index', :reference => :article)
       config.indices << double('index', :reference => :book)
       config.indices << double('index', :reference => :page)
@@ -88,6 +118,12 @@ describe ThinkingSphinx::Configuration do
     it "stores index files in db/sphinx/ENVIRONMENT" do
       config.indices_location.
         should == File.join(Rails.root, 'db', 'sphinx', 'test')
+    end
+
+    it "respects provided settings" do
+      write_configuration 'indices_location' => '/my/index/files'
+
+      config.indices_location.should == '/my/index/files'
     end
   end
 
